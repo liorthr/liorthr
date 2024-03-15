@@ -6,7 +6,7 @@
 - 📞 Contact me for any questions
 
 
-                                                        TECH STACK:
+                                                       💻 TECH STACK: 💻
 
 PROGRAMMING LANGUAGE: 
 - ![icons8-html-5 (1)](https://github.com/liorthr/liorthr/assets/136583556/3bdb347f-1d15-40b6-8299-1f3230b72643)
@@ -25,6 +25,4 @@ FRAMEWORK & ENVIRONNEMENT:
 <!---
 liorthr/liorthr is a ✨ special ✨ repository because its `README.md` (this file) appears on your GitHub profile.
 You can click the Preview link to take a look at your changes.
---->!![icons8-postgresql](https://github.com/liorthr/liorthr/assets/136583556/50cf656b-5e09-4ca3-8db7-b1338ddd2652)
-
-
+--->
