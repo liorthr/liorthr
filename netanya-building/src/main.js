@@ -5,6 +5,9 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Sky } from 'three/examples/jsm/objects/Sky.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import G from './geometry.json';
+import C from './context.json';
+import ORTHO18 from './ortho18.jpg';
+import ORTHO16 from './ortho16.jpg';
 
 const GF_H = G.meta.gf_h;      // hauteur RDC commercial
 const FH = G.meta.fh;          // hauteur d'étage courant (plancher à plancher)
@@ -12,6 +15,18 @@ const NF = G.meta.floors;      // nombre d'étages au-dessus du RDC
 const CX = 63, CY = 38;        // centre de la scène (m, repère plan)
 const P = (x, y, z = 0) => new THREE.Vector3(x - CX, z, -(y - CY));
 const levelZ = (k) => (k === 0 ? 0 : GF_H + (k - 1) * FH); // cote du plancher du niveau k
+// Géoréférencement (calé sur l'orthophoto) : le haut du plan pointe au N 12,5° E
+const BRG = THREE.MathUtils.degToRad(C.plan_up_bearing_deg);
+const [GPX, GPY] = C.gps_plan_xy; // point GPS fourni, dans le repère du plan
+// vecteur Est/Nord/Haut -> repère scène
+const enu = (E, N, U) => new THREE.Vector3(E * Math.cos(BRG) - N * Math.sin(BRG), U, -(E * Math.sin(BRG) + N * Math.cos(BRG)));
+// repère plan -> pixel de l'orthophoto z18 (pour texturer les toits voisins)
+const O18 = C.ortho18, MPP18 = O18.size_m / 1536;
+function planToUV(x, y) {
+  const dx = x - GPX, dy = y - GPY;
+  const E = dx * Math.cos(BRG) + dy * Math.sin(BRG), N = -dx * Math.sin(BRG) + dy * Math.cos(BRG);
+  return [(E - O18.center_en[0]) / O18.size_m + 0.5, (N - O18.center_en[1]) / O18.size_m + 0.5];
+}
 
 // ------------------------------------------------------------------ renderer
 const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -24,12 +39,12 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.5, 4000);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.5, 6000);
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.maxPolarAngle = Math.PI * 0.495;
 controls.minDistance = 5;
-controls.maxDistance = 900;
+controls.maxDistance = 1800;
 
 // ------------------------------------------------------------------ ciel / soleil
 const sky = new Sky();
@@ -41,7 +56,7 @@ const sunDir = new THREE.Vector3();
 const sun = new THREE.DirectionalLight(0xfff3e0, 3.2);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
-const sc = sun.shadow.camera; sc.left = -130; sc.right = 130; sc.top = 130; sc.bottom = -130; sc.near = 10; sc.far = 700;
+const sc = sun.shadow.camera; sc.left = -200; sc.right = 200; sc.top = 200; sc.bottom = -200; sc.near = 10; sc.far = 900;
 sun.shadow.bias = -0.0004; sun.shadow.normalBias = 0.04;
 scene.add(sun, sun.target);
 const hemi = new THREE.HemisphereLight(0xcfe3ff, 0xb9ab95, 0.9);
@@ -55,21 +70,21 @@ const envGround = new THREE.Mesh(new THREE.CircleGeometry(900, 32).rotateX(-Math
   new THREE.MeshBasicMaterial({ color: 0x8a8174 }));
 envGround.position.y = -5; skyScene.add(envGround);
 
-// Netanya : lat 32.3°N. Façade principale (rue Gad Manela) orientée ~sud (flèche nord du plan).
+// Netanya : 32.286°N. Le plan est tourné de 12,5° par rapport au nord géographique.
 function setSun(hour) {
-  const lat = THREE.MathUtils.degToRad(32.3);
+  const lat = THREE.MathUtils.degToRad(C.gps[0]);
   const decl = THREE.MathUtils.degToRad(-20); // fin novembre
   const H = THREE.MathUtils.degToRad((hour - 12) * 15);
   const alt = Math.asin(Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(H));
   let az = Math.atan2(Math.sin(H), Math.cos(H) * Math.sin(lat) - Math.tan(decl) * Math.cos(lat)); // depuis le sud, + vers l'ouest
   const elev = Math.max(alt, THREE.MathUtils.degToRad(2));
-  // repère scène : -Z = nord, +X = est
-  sunDir.set(-Math.sin(az) * Math.cos(elev), Math.sin(elev), Math.cos(az) * Math.cos(elev));
+  // az compté depuis le sud, positif vers l'ouest -> composantes Est/Nord, puis repère du plan
+  sunDir.copy(enu(-Math.sin(az) * Math.cos(elev), -Math.cos(az) * Math.cos(elev), Math.sin(elev)));
   su.sunPosition.value.copy(sunDir);
   skyForEnv.material.uniforms.sunPosition.value.copy(sunDir);
   for (const k of ['turbidity', 'rayleigh', 'mieCoefficient', 'mieDirectionalG'])
     skyForEnv.material.uniforms[k].value = su[k].value;
-  sun.position.copy(sunDir).multiplyScalar(400);
+  sun.position.copy(sunDir).multiplyScalar(500);
   const warm = THREE.MathUtils.clamp(alt / 0.6, 0, 1);
   sun.color.setHSL(0.09, 0.6 - 0.45 * warm, 0.75 + 0.2 * warm);
   sun.intensity = 0.6 + 2.8 * Math.sin(Math.max(alt, 0.03));
@@ -245,30 +260,27 @@ function flatPoly(pts, y, mat, parent = site, recv = true) {
   g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
   return addMesh(g, mat, false, recv, parent);
 }
-const big = new THREE.Mesh(new THREE.CircleGeometry(1400, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xa9a08e, roughness: 1 }));
-big.position.y = -0.25; big.receiveShadow = true; scene.add(big);
-// Parcelle et trottoirs (cote +0.00 = +22.80)
+const big = new THREE.Mesh(new THREE.CircleGeometry(2600, 64).rotateX(-Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0x9d957f, roughness: 1 }));
+big.position.y = -0.45; big.receiveShadow = true; scene.add(big);
+// Orthophotos réelles (Esri World Imagery) : 0,5 m/px sur 775 m, 2 m/px sur 3,1 km
+const texLoader = new THREE.TextureLoader();
+function orthoPlane(url, info, y) {
+  const t = texLoader.load(url); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(info.size_m, info.size_m).rotateX(-Math.PI / 2),
+    new THREE.MeshStandardMaterial({ map: t, roughness: 1 }));
+  const g = new THREE.Group(); const p = P(GPX, GPY); g.position.set(p.x, y, p.z); g.rotation.y = BRG;
+  m.position.set(info.center_en[0], 0, -info.center_en[1]); m.receiveShadow = true; g.add(m); scene.add(g);
+  return t;
+}
+const ortho18Tex = orthoPlane(ORTHO18, C.ortho18, -0.18);
+orthoPlane(ORTHO16, C.ortho16, -0.32);
+// Parcelle et trottoirs (cote +0.00 = +22.80) – l'orthophoto montre encore le chantier : on le recouvre
 flatPoly([[-12, -4.5], [131, -4.5], [136, 2], [136, 84], [126, 84], [-12, 54.7 - 0.209 * 12]], -0.02, matPave);
-// Rue Gad Manela (sud) : chaussée + terre-plein central
-flatPoly([[-60, -4.6], [200, -4.6], [200, -31], [-60, -31]], -0.12, matAsphalt);
-flatPoly([[3, -12.2], [137, -12.2], [137, -14.0], [3, -14.0]], 0.0, matCurb);
-flatPoly([[-60, -31], [200, -31], [200, -36], [-60, -36]], -0.04, matPave);
-// Rue est (perpendiculaire)
-flatPoly([[136.2, -31], [152, -31], [152, 140], [136.2, 140]], -0.11, matAsphalt);
-flatPoly([[152, -36], [158, -36], [158, 140], [152, 140]], -0.04, matPave);
-// Rue ouest (accès pompiers / parking)
-flatPoly([[-30, -4.6], [-12, -4.6], [-12, 60], [-30, 60]], -0.11, matAsphalt);
-// Espace vert public au nord (ש.צ.פ)
-flatPoly([[-30, 54.7 - 0.209 * 30 + 0.5], [126, 54.7 + 0.209 * 126 + 0.3], [126, 140], [-30, 140]], -0.06, matGrass);
+// Espace vert public au nord (ש.צ.פ), jusqu'à l'avenue
+flatPoly(C.park, -0.06, matGrass);
+flatPoly([[-12, 54.7 - 0.209 * 12], [126, 54.7 + 0.209 * 126], [126, 84], [-12, 84]], -0.05, matGrass);
 // bande engazonnée le long de la rue (plan : "דשא")
 flatPoly([[6, -2.6], [117, -2.6], [117, -1.5], [6, -1.5]], 0.01, matGrass);
-// passages piétons : ouest (sur Gad Manela), est
-const crossings = [[-11, -5.2, 0], [9, -6, 0], [132.5, -6, 0]];
-for (const [x, y] of crossings) for (let i = 0; i < 8; i++)
-  flatPoly([[x + i * 1.0, y], [x + i * 1.0 + 0.5, y], [x + i * 1.0 + 0.5, y - 24.5], [x + i * 1.0, y - 24.5]], -0.06, matStripe);
-for (let i = 0; i < 6; i++) flatPoly([[136.5, 2 + i], [152, 2 + i], [152, 2.5 + i], [136.5, 2.5 + i]], -0.06, matStripe);
-// marquage axial
-for (let x = -50; x < 195; x += 6) flatPoly([[x, -21.2], [x + 3, -21.2], [x + 3, -21.05], [x, -21.05]], -0.065, matStripe);
 
 // ------------------------------------------------------------------ BÂTIMENT
 const bldg = new THREE.Group(); scene.add(bldg);
@@ -400,7 +412,7 @@ const diagGroup = new THREE.Group(); bldg.add(diagGroup);
   for (let i = 0; i < path.length - 1; i++) {
     const a = path[i], b = path[i + 1], L = Math.hypot(b[0] - a[0], b[1] - a[1]);
     const A = P(a[0], a[1]), B = P(b[0], b[1]); const n = pos.length / 3;
-    const z0 = levelZ(1), z1 = levelZ(7);
+    const z0 = levelZ(1), z1 = levelZ(6);
     pos.push(A.x, z0, A.z, B.x, z0, B.z, B.x, z1, B.z, A.x, z1, A.z);
     uv.push(acc / 4.2, 0, (acc + L) / 4.2, 0, (acc + L) / 4.2, (z1 - z0) / FH, acc / 4.2, (z1 - z0) / FH);
     idx.push(n, n + 2, n + 1, n, n + 3, n + 2); acc += L;
@@ -409,7 +421,7 @@ const diagGroup = new THREE.Group(); bldg.add(diagGroup);
   gw.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); gw.setIndex(idx); gw.computeVertexNormals();
   const wm = addMesh(gw, mWall, true, true, diagGroup); wm.material.side = THREE.DoubleSide;
   // la résille elle-même, décollée de 0.55 m
-  diagrid(path, levelZ(1) - 0.3, levelZ(7), 2.2, 0.14, 0.24, diagGroup);
+  diagrid(path, levelZ(1) - 0.3, levelZ(6), 2.2, 0.14, 0.24, diagGroup);
 }
 // Local technique en toiture avec résille (photo 1)
 {
@@ -480,11 +492,25 @@ function block(x0, y0, x1, y1, h, mat = ctxMat) {
   addMesh(g, mat, true, true, context);
 }
 block(-13.5, 50.5, -2.5, 56.0, 3.5, ctxMat); // construction existante au NO (bloc noir du plan)
-block(170, -10, 230, 50, 24, ctxMat);
-block(170, 70, 215, 120, 18, ctxMat);
-block(-40, -70, 40, -45, 15, ctxMat);
-block(60, -80, 130, -48, 32, ctxGlass);
-block(150, -90, 175, -55, 72, ctxGlass); // tour de bureaux voisine
+// Bâtiments voisins relevés sur l'orthophoto ; toits texturés avec l'image réelle, hauteurs indicatives
+const nbWallTex = canvasTex(256, 256, (ctx, W, H) => {
+  ctx.fillStyle = '#e2ddd3'; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#9aa7b2'; ctx.fillRect(0, H * 0.25, W, H * 0.38);
+  ctx.fillStyle = '#d6d0c4'; for (let i = 0; i < 4; i++) ctx.fillRect(i * W / 4, H * 0.25, 5, H * 0.38);
+});
+const nbWall = new THREE.MeshStandardMaterial({ map: nbWallTex, roughness: 0.85 });
+const nbRoof = new THREE.MeshStandardMaterial({ map: ortho18Tex, roughness: 0.95 });
+for (const nb of C.buildings) {
+  const ring = { outer: nb.poly, holes: [] };
+  addMesh(wallGeo(nb.poly, 0, nb.h, 6, 3.5, true), nbWall, true, true, context);
+  const g = slabGeo([ring], nb.h);
+  const pos = g.attributes.position, uv = new Float32Array(pos.count * 2);
+  for (let i = 0; i < pos.count; i++) {
+    const [u, v] = planToUV(pos.getX(i) + CX, -pos.getZ(i) + CY); uv[2 * i] = u; uv[2 * i + 1] = v;
+  }
+  g.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+  addMesh(g, nbRoof, true, true, context);
+}
 // grue à tour (photos 4-5)
 {
   const cr = new THREE.Group(); const y = new THREE.MeshStandardMaterial({ color: 0xe8b021, roughness: 0.6 });
@@ -525,6 +551,7 @@ const views = {
   'Angle SO (résille)': { pos: [-26, 1.7, -14], look: [6, 14, 12] },
   'Cour intérieure': { pos: [33, 1.7, 28], look: [90, 14, 33] },
   'Vue aérienne': { pos: [175, 140, -95], look: [63, 10, 38] },
+  'Quartier (Poleg)': { pos: [330, 330, -330], look: [63, 0, 60] },
   'Plan (dessus)': { pos: [63, 260, 37.9], look: [63, 0, 38] },
 };
 function goView(name) {
@@ -539,7 +566,7 @@ document.getElementById('ctx').onchange = (e) => (context.visible = e.target.che
 document.getElementById('cut').oninput = (e) => {
   const n = +e.target.value; document.getElementById('cutv').textContent = n === NF ? 'tous' : 'jusqu\'au ' + n;
   floorsGroup.children.forEach((g, i) => (g.visible = i < n));
-  diagGroup.visible = n >= 6;
+  diagGroup.visible = n >= 5;
 };
 const hourEl = document.getElementById('hour');
 hourEl.oninput = () => { setSun(+hourEl.value); document.getElementById('hourv').textContent = fmtH(+hourEl.value); };
@@ -550,7 +577,19 @@ document.getElementById('stats').innerHTML = `
   Trame structurelle : 8,10 m<br>
   RDC commercial : ${GF_H.toFixed(2)} m · étages : ${FH.toFixed(2)} m<br>
   R+${NF} · acrotère ≈ ${topZ.toFixed(1)} m (+${(22.8 + topZ).toFixed(1)} NGI)<br>
-  Cour intérieure ≈ 1 600 m²`;
+  Cour intérieure ≈ 1 600 m²<br>
+  Orientation : axes du plan à N ${C.plan_up_bearing_deg}° E<br>
+  GPS : ${C.gps[0].toFixed(5)} N, ${C.gps[1].toFixed(5)} E`;
+document.getElementById('attr').textContent = C.attribution;
+// boussole
+const compass = document.getElementById('compass');
+const camDir = new THREE.Vector3();
+function updateCompass() {
+  camera.getWorldDirection(camDir);
+  const camHeading = Math.atan2(camDir.x, -camDir.z);   // cap de la caméra dans le repère scène
+  const northHeading = Math.atan2(-Math.sin(BRG), Math.cos(BRG));
+  compass.style.transform = `rotate(${THREE.MathUtils.radToDeg(northHeading - camHeading)}deg)`;
+}
 
 setSun(+hourEl.value);
 goView('Vue aérienne');
@@ -558,6 +597,6 @@ window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
-renderer.setAnimationLoop(() => { controls.update(); renderer.render(scene, camera); });
+renderer.setAnimationLoop(() => { controls.update(); updateCompass(); renderer.render(scene, camera); });
 window.__ready = true;
 window.__goView = goView;

@@ -87,9 +87,9 @@ wing_N = ring.intersection(Polygon([(24.0,27.5),(110.5,33.0),(110.5,200),(24.0,2
 wing_E = ring.intersection(box(110.5,-10,200,200)).difference(se_open)
 wing_N = wing_N.difference(wing_S)
 # l'aile N/E récupère la petite partie au-dessus de 104.5 côté cour
-FLOORS = 9
+FLOORS = 8   # R+8 : 5 niveaux pleins + 3 niveaux en gradins (comptage photo 1)
 GF_H = 6.0
-FH = 3.9
+FH = 3.8     # plancher à plancher (rapport module 1,35 m / hauteur d'étage sur photo 1)
 
 def strip_x(xmin, xmax):  return box(xmin, -50, xmax, 250)
 def setback_south(d):     return box(-50, UP_S + d, 250, 250)
@@ -100,19 +100,19 @@ for k in range(1, FLOORS+1):
     parts = []
     # aile ouest : façade à résille (diagrid) jusqu'au niveau 6 ; retraits ensuite
     w = wing_W
-    if k >= 7: w = w.intersection(setback_west(1.8*(k-6))).intersection(setback_south(1.6*(k-6)))
+    if k >= 6: w = w.intersection(setback_west(1.8*(k-5))).intersection(setback_south(1.6*(k-5)))
     parts.append(w)
     # aile sud : gradins vers l'est (une travée de 8.10 m par niveau à partir du 6)
     xmax = 104.5 if k <= 5 else 104.5 - 8.1*(k-5)
     s = wing_S.intersection(strip_x(-50, xmax))
-    if k >= 7: s = s.intersection(setback_south(1.6*(k-6)))
+    if k >= 6: s = s.intersection(setback_south(1.6*(k-5)))
     parts.append(s)
     # aile nord (courbe, suit la cour) : gradins vers l'ouest au sommet
-    xmin = 24.0 if k <= 6 else 24.0 + 8.1*(k-6)
+    xmin = 24.0 if k <= 5 else 24.0 + 8.1*(k-5)
     parts.append(wing_N.intersection(strip_x(xmin, 250)))
     # aile est
     e = wing_E
-    if k >= 8: e = e.intersection(box(-50, 34 + 8.1*(k-7), 250, 250))
+    if k >= 7: e = e.intersection(box(-50, 34 + 8.1*(k-6), 250, 250))
     parts.append(e)
     if k == 1: parts.append(bridge.difference(court_up))
     poly = unary_union([p for p in parts if not p.is_empty]).buffer(0.01).buffer(-0.01)

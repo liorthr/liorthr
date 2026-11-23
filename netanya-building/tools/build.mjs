@@ -10,7 +10,7 @@ const res = await build({
   entryPoints: [join(root, 'src/main.js')],
   bundle: true, minify: true, format: 'iife', write: false,
   nodePaths: [join(root, 'tools/node_modules')],
-  loader: { '.json': 'json' }, legalComments: 'none',
+  loader: { '.json': 'json', '.jpg': 'dataurl' }, legalComments: 'none',
 });
 const js = res.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const html = readFileSync(join(root, 'src/template.html'), 'utf8').replace('/*__BUNDLE__*/', () => js);
